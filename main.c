@@ -111,7 +111,7 @@ void hook_socket(){
 		} \
 		LOG("%s: hooked %s\n", __func__, STR(name)); \
 	}
-	HOOK(socket);
+	//HOOK(socket);
 	HOOK(recv);
 	#undef HOOK
 
