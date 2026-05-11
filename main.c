@@ -8,8 +8,26 @@
 #include <stdarg.h>
 #include <stdlib.h>
 
+#include <wctype.h>
+
 #define LOG_FILE "./beammp_launcher_win_shim.log"
 #define STR(s) #s
+
+#define HOOK(name) { \
+	int create_status = MH_CreateHook(name, name##_hooked, (void **)&name##_orig); \
+	if (create_status != MH_OK){ \
+		LOG("%s: failed creating hook for %s, %d\n", __func__, STR(name), create_status); \
+		exit(1); \
+	} \
+	\
+	\
+	int enable_status = MH_EnableHook(name); \
+	if (enable_status != MH_OK){ \
+		LOG("%s: failed enabling hook for %s, %d\n", __func__, STR(name), enable_status); \
+		exit(1); \
+	} \
+	LOG("%s: hooked %s\n", __func__, STR(name)); \
+}
 
 static LONG WINAPI (*WinVerifyTrust_real)(HWND hwnd,GUID *pgActionID,LPVOID pWVTData) = NULL;
 LONG WINAPI WinVerifyTrust(HWND hwnd,GUID *pgActionID,LPVOID pWVTData){
@@ -89,31 +107,61 @@ int WSAAPI recv_hooked(SOCKET s,char *buf,int len,int flags){
 	return offset;
 }
 
-void hook_socket(){
+void init_minhook(){
 	MH_STATUS minhook_init_status = MH_Initialize();
 	if (minhook_init_status != MH_OK && minhook_init_status != MH_ERROR_ALREADY_INITIALIZED){
 		LOG("%s: failed initializing minhook, %d\n", __func__, minhook_init_status);
 		exit(1);
 	}
+}
 
-	#define HOOK(name) { \
-		int create_status = MH_CreateHook(name, name##_hooked, (void **)&name##_orig); \
-		if (create_status != MH_OK){ \
-			LOG("%s: failed creating hook for %s, %d\n", __func__, STR(name), create_status); \
-			exit(1); \
-		} \
-		\
-		\
-		int enable_status = MH_EnableHook(name); \
-		if (enable_status != MH_OK){ \
-			LOG("%s: failed enabling hook for %s, %d\n", __func__, STR(name), enable_status); \
-			exit(1); \
-		} \
-		LOG("%s: hooked %s\n", __func__, STR(name)); \
-	}
+void hook_socket(){
 	//HOOK(socket);
 	HOOK(recv);
-	#undef HOOK
+
+	return;
+}
+
+WINBOOL WINAPI (*CopyFileW_orig) (LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, WINBOOL bFailIfExists) = NULL;
+WINBOOL WINAPI CopyFileW_hooked (LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, WINBOOL bFailIfExists){
+	int to_len = wcslen(lpNewFileName);
+	wchar_t to_lowered[1024] = {0};
+	for(int i = 0;i < to_len;i++){
+		to_lowered[i] = towlower(lpNewFileName[i]);
+	}
+
+	char from_buf[2048] = {0};
+	char to_buf[2048] = {0};
+
+	wcstombs(from_buf, lpExistingFileName, sizeof(from_buf) - 1);
+	wcstombs(to_buf, to_lowered, sizeof(to_buf) - 1);
+
+	LOG("%s: copying from %s to %s\n", __func__, from_buf, to_buf);
+	return CopyFileW_orig(lpExistingFileName, to_lowered, bFailIfExists);
+}
+
+
+WINBOOL WINAPI (*MoveFileExW_orig) (LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags) = NULL;
+WINBOOL WINAPI MoveFileExW_hooked (LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags){
+	int to_len = wcslen(lpNewFileName);
+	wchar_t to_lowered[1024] = {0};
+	for(int i = 0;i < to_len;i++){
+		to_lowered[i] = towlower(lpNewFileName[i]);
+	}
+
+	char from_buf[2048] = {0};
+	char to_buf[2048] = {0};
+
+	wcstombs(from_buf, lpExistingFileName, sizeof(from_buf) - 1);
+	wcstombs(to_buf, to_lowered, sizeof(to_buf) - 1);
+
+	LOG("%s: moving from %s to %s\n", __func__, from_buf, to_buf);
+	return MoveFileExW_orig(lpExistingFileName, to_lowered, dwFlags);
+}
+
+void hook_resource_write(){
+	HOOK(CopyFileW);
+	HOOK(MoveFileExW);
 
 	return;
 }
@@ -129,7 +177,9 @@ int init(){
 	HANDLE real_dll = LoadLibraryA(dll_path);
 	WinVerifyTrust_real = (void *)GetProcAddress(real_dll, "WinVerifyTrust");
 
-	hook_socket();
+	init_minhook();
+	//hook_socket();
+	hook_resource_write();
 
 	LOG("%s: ready\n", __func__);
 
