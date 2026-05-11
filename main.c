@@ -1,5 +1,7 @@
 #include <winsock2.h>
 #include <libloaderapi.h>
+#include <memoryapi.h>
+#include <psapi.h>
 #include <windows.h>
 
 #include <MinHook.h>
@@ -7,6 +9,8 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 #include <wctype.h>
 
@@ -151,6 +155,71 @@ WINBOOL WINAPI MoveFileExW_hooked (LPCWSTR lpExistingFileName, LPCWSTR lpNewFile
 	return MoveFileExW_orig(lpExistingFileName, to_lowered, dwFlags);
 }
 
+uint8_t *find_pattern(uint8_t *pattern, int pattern_size, uint8_t *begin, int size){
+	for(int offset = 0;offset + pattern_size <= size;offset++){
+		if (memcmp(&begin[offset], pattern, pattern_size) == 0){
+			return &begin[offset];
+		}
+	}
+	return NULL;
+}
+
+bool find_and_patch_pattern(uint8_t *pattern, uint8_t *patch, int pattern_size, uint8_t *begin, int size){
+	uint8_t *location = find_pattern(pattern, pattern_size, begin, size);
+	if (location == NULL){
+		return false;
+	}
+
+	DWORD orig_prot;
+	VirtualProtect(location, pattern_size, PAGE_EXECUTE_READWRITE, &orig_prot);
+	memcpy(location, patch, pattern_size);
+	VirtualProtect(location, pattern_size, orig_prot, &orig_prot);
+	return true;
+}
+
+void patch_mod_path(){
+	const static wchar_t pattern[] = LR"(mods\multiplayer\BeamMP.zip)";
+	const static wchar_t patch[] = LR"(mods\multiplayer\beammp.zip)";
+
+	HMODULE module_handles[512] = {0};
+	DWORD returned_size = 0;
+	EnumProcessModules(GetCurrentProcess(), module_handles, sizeof(module_handles), &returned_size);
+
+	HMODULE main_module_handle = NULL;
+	int num_modules = returned_size / sizeof(HMODULE);
+
+	for(int i = 0;i < num_modules;i++){
+		char base_name[512] = {0};
+		DWORD name_get_status = GetModuleBaseNameA(GetCurrentProcess(), module_handles[i], base_name, sizeof(base_name));
+		if (name_get_status == 0){
+			LOG("%s: failed getting name of module 0x%lx, 0x%x\n", __func__, module_handles[i], GetLastError());
+			continue;
+		}
+		LOG("%s: module %s\n", __func__, base_name);
+		if (strcmp(base_name, "BeamMP-Launcher.exe") == 0){
+			main_module_handle = module_handles[i];
+			break;
+		}
+	}
+
+	if (main_module_handle == NULL){
+		LOG("%s: main module not found\n", __func__);
+		return;
+	}
+
+	MODULEINFO modinfo = {0};
+	GetModuleInformation(GetCurrentProcess(), main_module_handle, &modinfo, sizeof(modinfo));
+
+	bool patch_status = find_and_patch_pattern((uint8_t *)pattern, (uint8_t *)patch, sizeof(pattern), (uint8_t*)modinfo.lpBaseOfDll, modinfo.SizeOfImage);
+
+	if (patch_status){
+		LOG("%s: mod path patched\n", __func__);
+	}else{
+		LOG("%s: mod path not patched\n", __func__);
+		exit(1);
+	}
+}
+
 void hook_functions(){
 	HOOK(socket);
 	HOOK(recv);
@@ -171,8 +240,10 @@ int init(){
 
 	init_minhook();
 	hook_functions();
+	patch_mod_path();
 
 	LOG("%s: ready\n", __func__);
+	printf("%s: beammp_launcher_win_shim ready\n", __func__);
 
 	return 0;
 }
