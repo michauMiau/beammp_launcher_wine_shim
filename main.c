@@ -115,8 +115,8 @@ void init_minhook(){
 	}
 }
 
-void hook_socket(){
-	//HOOK(socket);
+void hook_networking(){
+	HOOK(socket);
 	HOOK(recv);
 
 	return;
@@ -178,7 +178,7 @@ int init(){
 	WinVerifyTrust_real = (void *)GetProcAddress(real_dll, "WinVerifyTrust");
 
 	init_minhook();
-	//hook_socket();
+	hook_networking();
 	hook_resource_write();
 
 	LOG("%s: ready\n", __func__);
