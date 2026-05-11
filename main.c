@@ -115,13 +115,6 @@ void init_minhook(){
 	}
 }
 
-void hook_networking(){
-	HOOK(socket);
-	HOOK(recv);
-
-	return;
-}
-
 WINBOOL WINAPI (*CopyFileW_orig) (LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, WINBOOL bFailIfExists) = NULL;
 WINBOOL WINAPI CopyFileW_hooked (LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, WINBOOL bFailIfExists){
 	int to_len = wcslen(lpNewFileName);
@@ -139,7 +132,6 @@ WINBOOL WINAPI CopyFileW_hooked (LPCWSTR lpExistingFileName, LPCWSTR lpNewFileNa
 	LOG("%s: copying from %s to %s\n", __func__, from_buf, to_buf);
 	return CopyFileW_orig(lpExistingFileName, to_lowered, bFailIfExists);
 }
-
 
 WINBOOL WINAPI (*MoveFileExW_orig) (LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags) = NULL;
 WINBOOL WINAPI MoveFileExW_hooked (LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags){
@@ -159,11 +151,11 @@ WINBOOL WINAPI MoveFileExW_hooked (LPCWSTR lpExistingFileName, LPCWSTR lpNewFile
 	return MoveFileExW_orig(lpExistingFileName, to_lowered, dwFlags);
 }
 
-void hook_resource_write(){
+void hook_functions(){
+	HOOK(socket);
+	HOOK(recv);
 	HOOK(CopyFileW);
 	HOOK(MoveFileExW);
-
-	return;
 }
 
 __attribute__((constructor))
@@ -178,8 +170,7 @@ int init(){
 	WinVerifyTrust_real = (void *)GetProcAddress(real_dll, "WinVerifyTrust");
 
 	init_minhook();
-	hook_networking();
-	hook_resource_write();
+	hook_functions();
 
 	LOG("%s: ready\n", __func__);
 
