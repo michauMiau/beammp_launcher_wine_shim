@@ -24,13 +24,28 @@
 		exit(1); \
 	} \
 	\
-	\
 	int enable_status = MH_EnableHook(name); \
 	if (enable_status != MH_OK){ \
 		LOG("%s: failed enabling hook for %s, %d\n", __func__, STR(name), enable_status); \
 		exit(1); \
 	} \
 	LOG("%s: hooked %s\n", __func__, STR(name)); \
+}
+
+#define HOOK_API(mod_name, name) { \
+	void *target; \
+	int create_status = MH_CreateHookApiEx(mod_name, STR(name), name##_hooked, (void **)&name##_orig, &target); \
+	if (create_status != MH_OK){ \
+		LOG("%s: failed creating hook for %ls %s, %d\n", __func__, mod_name, STR(name), create_status); \
+		exit(1); \
+	} \
+	\
+	int enable_status = MH_EnableHook(target); \
+	if (enable_status != MH_OK){ \
+		LOG("%s: failed enabling hook for %ls %s, %d\n", __func__, mod_name, STR(name), enable_status); \
+		exit(1); \
+	} \
+	LOG("%s: hooked %ls %s\n", __func__, mod_name, STR(name)); \
 }
 
 static LONG WINAPI (*WinVerifyTrust_real)(HWND hwnd,GUID *pgActionID,LPVOID pWVTData) = NULL;
@@ -220,11 +235,31 @@ void patch_mod_path(){
 	}
 }
 
+WINBOOL WINAPI (*CreateProcessW_orig) (LPCWSTR lpApplicationName, LPWSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes, LPSECURITY_ATTRIBUTES lpThreadAttributes, WINBOOL bInheritHandles, DWORD dwCreationFlags, LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory, LPSTARTUPINFOW lpStartupInfo, LPPROCESS_INFORMATION lpProcessInformation) = NULL;
+WINBOOL WINAPI CreateProcessW_hooked (LPCWSTR lpApplicationName, LPWSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes, LPSECURITY_ATTRIBUTES lpThreadAttributes, WINBOOL bInheritHandles, DWORD dwCreationFlags, LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory, LPSTARTUPINFOW lpStartupInfo, LPPROCESS_INFORMATION lpProcessInformation){
+	LOG("%s: %ls\n", __func__, lpCommandLine);
+	char cur_command_buf[2048] = {0};
+	wcstombs(cur_command_buf, lpCommandLine, sizeof(cur_command_buf) - 1);
+	if (strstr(cur_command_buf, "BeamNG.drive") == NULL){
+		return CreateProcessW_orig(lpApplicationName, lpCommandLine, lpProcessAttributes, lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo, lpProcessInformation);
+	}
+	wchar_t override_buf[2048] = {0};
+	wchar_t *new_cmd = lpCommandLine;
+	const char *override = getenv("BEAMMP_LAUNCH_OVERRIDE");
+	if (override != NULL){
+		LOG("%s: overriding launch command %ls to %s\n", __func__, lpCommandLine, override);
+		mbstowcs(override_buf, override, sizeof(override_buf) - 2);
+		new_cmd = override_buf;
+	}
+	return CreateProcessW_orig(lpApplicationName, new_cmd, lpProcessAttributes, lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, lpCurrentDirectory, lpStartupInfo, lpProcessInformation);
+}
+
 void hook_functions(){
 	HOOK(socket);
 	HOOK(recv);
 	HOOK(CopyFileW);
 	HOOK(MoveFileExW);
+	HOOK(CreateProcessW);
 }
 
 __attribute__((constructor))
