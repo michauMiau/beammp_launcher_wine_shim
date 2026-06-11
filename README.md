@@ -1,4 +1,8 @@
 ### beammp_launcher_wine_shim
+I took the very hard work of compiling this so you don't have to compile it,
+the files are in the release **https://github.com/michauMiau/beammp_launcher_wine_shim/releases/tag/1**
+thx to kethen for making this fix to beammp so you can run it in proton
+
 
 #### Build
 
